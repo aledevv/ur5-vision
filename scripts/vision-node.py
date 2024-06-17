@@ -18,7 +18,6 @@ import open3d as o3d
 from scipy.spatial.transform import Rotation as R
 import time
 
-
 # --------------- DIRECTORIES ---------------
 ROOT = Path(__file__).resolve().parents[1]  # vision directory
 if str(ROOT) not in sys.path:
@@ -203,7 +202,7 @@ def visualize_point_cloud(pcd):
 
 # Loading Mesh model of the block having a specific label
 def load_mesh_model(block_label):
-    mesh = o3d.io.read_triangle_mesh('X1-Y3-Z2-FILLET.stl').sample_points_poisson_disk(6138)
+    mesh = o3d.io.read_triangle_mesh('models/'+block_label+'/mesh/'+block_label+'.stl').sample_points_poisson_disk(6138)
 
     #o3d.visualization.draw_geometries([mesh])
 
@@ -230,6 +229,13 @@ def extract_rpy_from_transformation(transformation):
     # Use scipy to convert rotation matrix to RPY angles
     r = R.from_matrix(rotation_matrix)
     roll, pitch, yaw = r.as_euler('xyz')
+
+    if roll > 3.14:
+        roll = roll - 3.14
+    if pitch > 3.14:
+        pitch = pitch - 3.14
+    if yaw > 3.14:
+        yaw = yaw - 3.14
 
     return roll, pitch, yaw
 
@@ -265,12 +271,13 @@ def euler_to_rotation_matrix(euler_angles):
 
     return rotation_matrix
 
+
 def correct_pc_orientation(pcd):
     # Definisci l'asse di rotazione (per esempio attorno all'asse y)
 
     global base_offset
 
-    translation_vector = [0, 0, -0.89]
+    translation_vector = [0, 0, 0.86992]
 
     # Inizializza una matrice identità 4x4
     translation_matrix = np.eye(4)
@@ -298,7 +305,7 @@ def prepare_point_clouds(source, target, voxel_size):
                            [0.0, 1.0, 0.0, 0.0], [0.0, 0.0, 0.0, 1.0]])
     source.transform(trans_init)
 
-    target = correct_pc_orientation(target)
+    #target = correct_pc_orientation(target)
     target.transform(trans_init)
 
     #draw_registration_result(source, target, np.identity(4))
@@ -334,7 +341,7 @@ def execute_global_registration(source_down, target_down, source_fpfh, target_fp
         3, [
             o3d.pipelines.registration.CorrespondenceCheckerBasedOnEdgeLength(0.9),
             o3d.pipelines.registration.CorrespondenceCheckerBasedOnDistance(distance_threshold)
-        ], o3d.pipelines.registration.RANSACConvergenceCriteria(100000, 0.99)
+        ], o3d.pipelines.registration.RANSACConvergenceCriteria(4000000, 0.999)
     )
 
     return result
@@ -352,6 +359,24 @@ def refine_registration(source, target, source_fpfh, target_fpfh, voxel_size, re
     return result
 
 
+def rotate_point_cloud(pcd, rotation_vector):
+    """
+    Ruota la nuvola di punti secondo il vettore di rotazione specificato.
+
+    Args:
+        pcd (open3d.geometry.PointCloud): La nuvola di punti da ruotare.
+        rotation_vector (tuple): Un vettore di 3 angoli in radianti (roll, pitch, yaw).
+
+    Returns:
+        open3d.geometry.PointCloud: La nuvola di punti ruotata.
+    """
+    # Crea la matrice di rotazione dalle componenti del vettore
+    rotation_matrix = o3d.geometry.get_rotation_matrix_from_xyz(rotation_vector)
+    # Applica la rotazione alla nuvola di punti
+    pcd.rotate(rotation_matrix, center=(0, 0, 0))
+    return pcd
+
+
 # Operation to get and elaborate point cloud of blocks
 def get_point_cloud2(point_cloud):
     # @Description Callback function to collect point cloud and estimate center and pose of each block detected
@@ -367,6 +392,10 @@ def get_point_cloud2(point_cloud):
 
         point_cloud_box = []
 
+        if len(block_list) == 0:
+            print("NO BLOCK DETECTED")
+            sys.exit(1)
+
         for block in block_list:
             for x in range(int(block.x1), int(block.x2)):
                 for y in range(int(block.y1), int(block.y2)):
@@ -381,10 +410,16 @@ def get_point_cloud2(point_cloud):
 
             target = create_open3d_point_cloud(point_cloud_box)
 
+            rotate_point_cloud(target, [0, 0, 0])
+
             print("LABEL: ", block.label)
             #visualize_point_cloud(pcd)
 
             source = load_mesh_model(block.label)
+
+            #correct_pc_orientation(source)
+
+            #draw_registration_result(source, target, np.identity(4))
 
             source, target, source_down, target_down, source_fpfh, target_fpfh = prepare_point_clouds(source, target, voxel_size)
 
@@ -398,14 +433,12 @@ def get_point_cloud2(point_cloud):
 
             draw_registration_result(source_down, target_down, result_icp.transformation)
 
-            #transformation = execute_icp(source, target, icp_threshold)
-
 
             #draw_registration_result(source, target, transformation)
 
             #print("Transformation matrix:\n", transformation)
 
-            roll, pitch, yaw = extract_rpy_from_transformation(result_ransac.transformation)
+            roll, pitch, yaw = extract_rpy_from_transformation(result_icp.transformation)
 
             print("Roll: ", roll)
             print("Pitch: ", pitch)
