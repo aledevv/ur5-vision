@@ -34,8 +34,8 @@ bridge = CvBridge()
 R_cloud_to_world = np.matrix([[0, -0.49948, 0.86632], [-1., 0., 0.], [0., -0.86632, -0.49948]])
 x_camera = np.array([-0.9, 0.24, -0.35])
 base_offset = np.array([0.5, 0.35, 1.75])
-block_offset = [0.0189, -0.007, 0]
-voxel_size = 0.004
+block_offset = np.array([-0.011453, -0.005865, -0.019507])
+voxel_size = 0.005
 
 
 TABLE_OFFSET = 0.86 + 0.1
@@ -46,7 +46,7 @@ can_take_point_cloud = False
 send_next_msg = True
 block_list = []
 measures = 0        # num of measures for world position of blocks
-icp_threshold = 0.0001
+icp_threshold = 0.004
 
 class Point:
     # @Description Class to store points in the world space useful to estimate block pose
@@ -272,12 +272,12 @@ def euler_to_rotation_matrix(euler_angles):
     return rotation_matrix
 
 
-def correct_pc_orientation(pcd):
+def translate_point_cloud(pcd, vector):
     # Definisci l'asse di rotazione (per esempio attorno all'asse y)
 
     global base_offset
 
-    translation_vector = [0, 0, 0.86992]
+    translation_vector = vector
 
     # Inizializza una matrice identità 4x4
     translation_matrix = np.eye(4)
@@ -292,12 +292,13 @@ def correct_pc_orientation(pcd):
 
 
 def draw_registration_result(source, target, transformation):
+    coordinate_frame = o3d.geometry.TriangleMesh.create_coordinate_frame(size=0.25, origin=[0, 0, 0])
     source_tmp = copy.deepcopy(source)
     target_tmp = copy.deepcopy(target)
     source_tmp.paint_uniform_color([1, 0.706, 0])
     target_tmp.paint_uniform_color([0, 0.651, 0.929])
     source_tmp.transform(transformation)
-    o3d.visualization.draw_geometries([source_tmp, target_tmp])
+    o3d.visualization.draw_geometries([source_tmp, target_tmp, coordinate_frame])
 
 
 def prepare_point_clouds(source, target, voxel_size):
@@ -341,7 +342,7 @@ def execute_global_registration(source_down, target_down, source_fpfh, target_fp
         3, [
             o3d.pipelines.registration.CorrespondenceCheckerBasedOnEdgeLength(0.9),
             o3d.pipelines.registration.CorrespondenceCheckerBasedOnDistance(distance_threshold)
-        ], o3d.pipelines.registration.RANSACConvergenceCriteria(4000000, 0.999)
+        ], o3d.pipelines.registration.RANSACConvergenceCriteria(4000000, 0.9999)
     )
 
     return result
@@ -361,7 +362,7 @@ def refine_registration(source, target, source_fpfh, target_fpfh, voxel_size, re
 
 def rotate_point_cloud(pcd, rotation_vector):
     """
-    Ruota la nuvola di punti secondo il vettore di rotazione specificato.
+    Ruota la nuvola di punti secondo il vettore di rotazione specificato attorno al proprio centro.
 
     Args:
         pcd (open3d.geometry.PointCloud): La nuvola di punti da ruotare.
@@ -370,11 +371,137 @@ def rotate_point_cloud(pcd, rotation_vector):
     Returns:
         open3d.geometry.PointCloud: La nuvola di punti ruotata.
     """
+    # Calcola il centro della nuvola di punti
+    center = pcd.get_center()
+
     # Crea la matrice di rotazione dalle componenti del vettore
     rotation_matrix = o3d.geometry.get_rotation_matrix_from_xyz(rotation_vector)
+
+    # Trasla la nuvola di punti in modo che il centro coincida con l'origine
+    pcd.translate(-center)
+
+    # Applica la rotazione attorno all'origine (che ora è il centro della nuvola di punti)
+    pcd.rotate(rotation_matrix)
+
+    # Riporta la nuvola di punti alla posizione originale
+    pcd.translate(center)
+
+    return pcd
+
+
+def rotate_point_cloud_about_axis(pcd, rotation_vector):
+    # Crea la matrice di rotazione dalle componenti del vettore
+    rotation_matrix = o3d.geometry.get_rotation_matrix_from_xyz(rotation_vector)
+
     # Applica la rotazione alla nuvola di punti
     pcd.rotate(rotation_matrix, center=(0, 0, 0))
     return pcd
+
+def mirror_point_cloud(pcd, axis='x'):
+    """
+    Specchia la nuvola di punti rispetto all'asse specificato.
+
+    Args:
+        pcd (open3d.geometry.PointCloud): La nuvola di punti da specchiare.
+        axis (str): L'asse rispetto al quale specchiare ('x', 'y' o 'z').
+
+    Returns:
+        open3d.geometry.PointCloud: La nuvola di punti specchiata.
+    """
+    # Matrice di trasformazione per specchiare la nuvola di punti
+    if axis == 'x':
+        transformation_matrix = np.array([[-1, 0, 0, 0],
+                                          [0, 1, 0, 0],
+                                          [0, 0, 1, 0],
+                                          [0, 0, 0, 1]])
+    elif axis == 'y':
+        transformation_matrix = np.array([[1, 0, 0, 0],
+                                          [0, -1, 0, 0],
+                                          [0, 0, 1, 0],
+                                          [0, 0, 0, 1]])
+    elif axis == 'z':
+        transformation_matrix = np.array([[1, 0, 0, 0],
+                                          [0, 1, 0, 0],
+                                          [0, 0, -1, 0],
+                                          [0, 0, 0, 1]])
+    else:
+        raise ValueError("Axis must be 'x', 'y' or 'z'")
+
+    # Applica la trasformazione
+    pcd.transform(transformation_matrix)
+    return pcd
+
+def compute_pose(point_cloud):
+    """
+    Calcola la posa (matrice di trasformazione) di una nuvola di punti.
+
+    Args:
+        point_cloud (open3d.geometry.PointCloud): La nuvola di punti di cui calcolare la posa.
+
+    Returns:
+        np.ndarray: La matrice di trasformazione 4x4 che rappresenta la posa della nuvola di punti.
+    """
+    # Calcola il centro della nuvola di punti
+    center = point_cloud.get_center()
+
+    # Per semplificazione, usiamo una matrice di rotazione identità
+    rotation_matrix = np.eye(3)
+
+    # Combina il centro (traslazione) e la matrice di rotazione in una matrice di trasformazione 4x4
+    transformation_matrix = np.eye(4)
+    transformation_matrix[:3, :3] = rotation_matrix
+    transformation_matrix[:3, 3] = center
+
+    return transformation_matrix
+
+
+def filter_point_cloud_by_distance(point_cloud, max_distance):
+    """
+    Rimuove i punti dalla nuvola di punti che sono distanti oltre una certa soglia.
+
+    Args:
+        point_cloud (open3d.geometry.PointCloud): La nuvola di punti da filtrare.
+        max_distance (float): La distanza massima consentita.
+
+    Returns:
+        open3d.geometry.PointCloud: La nuvola di punti filtrata.
+    """
+    # Converti la nuvola di punti in un array NumPy
+    points = np.asarray(point_cloud.points)
+
+    # Calcola la distanza di ogni punto dall'origine (0, 0, 0)
+    distances = np.linalg.norm(points, axis=1)
+
+    # Filtra i punti che sono entro la distanza massima
+    filtered_points = points[distances <= max_distance]
+
+    # Crea una nuova nuvola di punti con i punti filtrati
+    filtered_point_cloud = o3d.geometry.PointCloud()
+    filtered_point_cloud.points = o3d.utility.Vector3dVector(filtered_points)
+
+    return filtered_point_cloud
+
+
+def convert_3x3_to_4x4(matrix_3x3):
+    """
+    Converte una matrice 3x3 in una matrice di trasformazione omogenea 4x4.
+
+    Args:
+        matrix_3x3 (numpy.ndarray): La matrice di rotazione 3x3.
+
+    Returns:
+        numpy.ndarray: La matrice di trasformazione omogenea 4x4.
+    """
+    # Assicurati che la matrice di input sia 3x3
+    assert matrix_3x3.shape == (3, 3), "La matrice di input deve essere 3x3"
+
+    # Crea una matrice 4x4 di identità
+    matrix_4x4 = np.eye(4)
+
+    # Copia la matrice 3x3 nella parte superiore sinistra della matrice 4x4
+    matrix_4x4[:3, :3] = matrix_3x3
+
+    return matrix_4x4
 
 
 # Operation to get and elaborate point cloud of blocks
@@ -403,32 +530,43 @@ def get_point_cloud2(point_cloud):
                         point_cloud_box.append(np.array(point))
                         block.point_cloud_coord = [point[0], point[1], point[2]]
 
-            # computing world coordinates through a transformation matrix and correcting result adding offsets
-            block.world_coord = R_cloud_to_world.dot(block.point_cloud_coord) + x_camera + base_offset + block_offset
-            block.world_coord[0, 2] = 0.86999  # z of the block is a constant
-            #print("WORLD:", block.world_coord)
+
 
             target = create_open3d_point_cloud(point_cloud_box)
 
-            rotate_point_cloud(target, [0, 0, 0])
+
+
+
+
+            # # computing world coordinates through a transformation matrix and correcting result adding offsets
+            # block.world_coord = R_cloud_to_world.dot(target.get_center()) + x_camera + base_offset + block_offset
+            # block.world_coord[0, 2] = 0.86999  # z of the block is a constant
+            # print("WORLD:", block.world_coord)
 
             print("LABEL: ", block.label)
             #visualize_point_cloud(pcd)
 
             source = load_mesh_model(block.label)
 
-            #correct_pc_orientation(source)
+#[-0.02216, -0.40428 , 0.0211]
+            target = rotate_point_cloud_about_axis(target, [np.pi - 0.02216, np.pi/2 - 0.40428, np.pi/2 + 0.0211])
+            target = translate_point_cloud(target, [-0.4, 0.52, 1.4])
+            #source = translate_point_cloud(source, [-0.4, 0.52, 1.4])
+
+            print("TARGET center: ", target.get_center())
+
+            #pose = compute_pose(target)
 
             #draw_registration_result(source, target, np.identity(4))
 
             source, target, source_down, target_down, source_fpfh, target_fpfh = prepare_point_clouds(source, target, voxel_size)
-
+            #
             result_ransac = execute_global_registration(source_down, target_down, source_fpfh, target_fpfh, voxel_size)
-
+            #
             print("RANSAC result: ", result_ransac)
-
+            #
             result_icp = refine_registration(source_down, target_down, source_fpfh, target_fpfh, voxel_size, result_ransac)
-
+            #
             print("ICP result: ", result_icp)
 
             draw_registration_result(source_down, target_down, result_icp.transformation)
@@ -438,11 +576,11 @@ def get_point_cloud2(point_cloud):
 
             #print("Transformation matrix:\n", transformation)
 
-            roll, pitch, yaw = extract_rpy_from_transformation(result_icp.transformation)
+            yaw, pitch, roll = extract_rpy_from_transformation(result_icp.transformation)
 
-            print("Roll: ", roll)
-            print("Pitch: ", pitch)
-            print("Yaw: ", yaw)
+            print("Roll: ", roll + 0.11)
+            print("Pitch: ", pitch )
+            print("Yaw: ", yaw )
 
         can_take_point_cloud = False
 

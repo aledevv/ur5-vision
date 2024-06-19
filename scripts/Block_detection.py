@@ -20,6 +20,8 @@ ROOT = Path(os.path.abspath(ROOT))
 
 IMG_PATH = str(ROOT) + '/images/ROI_table.png'
 
+IMG_BLOCK_ISOLATED_PATH = str(ROOT) + 'images/BLOCK.png'
+
 # --------------------- CONSTANTS ---------------------
 WEIGHTS = str(ROOT) + "/weights/best.pt"
 CONFIDENCE = 0.5
