@@ -15,12 +15,12 @@ OUTPUT_FILE = str(ROOT) + '/images/ROI_table.png'
 
 # --------------------- FUNCTIONS  ---------------------
 
-
 def find_roi(img_path):
-    # @Description Finds the ROI knowing the position of the vertices of the table through a bitwise operation between
-    #  input image and a mask
-    # @Parameters path of input image
+    """
+    Finds the Region of Interest (ROI) in the input image based on the position of the vertices of the table.
 
+    @param img_path: Path of the input image.
+    """
     img = cv2.imread(img_path)
     mask = np.zeros(img.shape[0:2], dtype=np.uint8)
     table_points = np.array([[[844, 410], [1196, 410], [1541, 905], [678, 905]]]) # corners of the table
@@ -28,8 +28,7 @@ def find_roi(img_path):
     res = cv2.bitwise_and(img, img, mask=mask)
     cv2.imwrite(OUTPUT_FILE, res)
 
-
 # --------------------- MAIN  ---------------------
-if __name__ == '__main__':
 
+if __name__ == '__main__':
     find_roi(INPUT_FILE)

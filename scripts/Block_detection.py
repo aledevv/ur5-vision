@@ -20,13 +20,13 @@ ROOT = Path(os.path.abspath(ROOT))
 
 IMG_PATH = str(ROOT) + '/images/ROI_table.png'
 IMG_ZED = str(ROOT) + '/images/img_ZED_cam.png'
-IMG_BLOCK_ISOLATED_PATH = str(ROOT) + 'images/BLOCK.png'
+IMG_BLOCK_ISOLATED_PATH = str(ROOT) + '/images/BLOCK.png'
 
 # --------------------- CONSTANTS ---------------------
 debug = False
 WEIGHTS = str(ROOT) + "/weights/best.pt"
 CONFIDENCE = 0.5
-yolo_model = YOLO(WEIGHTS) # YOLO model trained to detect lego pieces
+yolo_model = YOLO(WEIGHTS)  # YOLO model trained to detect lego pieces
 
 SAVE_PREDICTION_TXT = False
 SAVE_PREDICTION_IMG = True
@@ -47,6 +47,16 @@ LEGO_LABELS =  ['X1-Y1-Z2',
 class LegoBlock:
 
     def __init__(self, label, confidence, x1, y1, x2, y2):
+        """
+        Constructor for LegoBlock class.
+
+        @param label: Label of the Lego block.
+        @param confidence: Confidence score of the detection.
+        @param x1: x-coordinate of the top-left corner.
+        @param y1: y-coordinate of the top-left corner.
+        @param x2: x-coordinate of the bottom-right corner.
+        @param y2: y-coordinate of the bottom-right corner.
+        """
         self.label = label
         self.confidence = confidence
         self.x1 = x1
@@ -59,9 +69,10 @@ class LegoBlock:
         self.world_coord = []
         self.pose = []
 
-
     def info(self):
-        # @Description Function that writes some info about the block
+        """
+        Prints information about the Lego block.
+        """
         print("\nBlock label: " + self.label)
         print("\tconfidence: " + str(round(self.confidence, 3)))
         print("\tTop-left corner: (" + str(int(self.x1)) + ", " + str(int(self.y1)) + ")")
@@ -69,9 +80,12 @@ class LegoBlock:
 
 
 def store_blocks(data):
-    # @Description takes blocks data from json object from YOLO detection to create a list of blocks
-    # @Parameters JSON/dictionary object
-    # @Returns a list of Blocks
+    """
+    Takes blocks data from JSON object from YOLO detection to create a list of LegoBlock objects.
+
+    @param data: JSON/dictionary object containing detection results.
+    @return: List of LegoBlock objects.
+    """
     blocks = []
 
     for lego in data:
@@ -87,35 +101,40 @@ def store_blocks(data):
 
 
 def find_point_cloud_roi(block):
+    """
+    Finds the point cloud coordinates for the given Lego block.
+
+    @param block: LegoBlock object.
+    @return: Modified LegoBlock object with point cloud coordinates.
+    """
     cropped_block_img = get_bbox_image(block)
 
-    # Converti l'immagine in formato HSV
+    # Convert the image to HSV format
     hsv_image = cv2.cvtColor(cropped_block_img, cv2.COLOR_BGR2HSV)
 
-    # Definisci l'intervallo di colore per il grigio (in formato HSV)
-    lower_gray = np.array([0, 0, 50])  # Cambia questi valori se necessario
-    upper_gray = np.array([180, 50, 200])  # Cambia questi valori se necessario
+    # Define the color range for gray (in HSV format)
+    lower_gray = np.array([0, 0, 50])  # Adjust these values if needed
+    upper_gray = np.array([180, 50, 200])  # Adjust these values if needed
 
-    # Crea una maschera per isolare il colore grigio
+    # Create a mask to isolate gray color
     gray_mask = cv2.inRange(hsv_image, lower_gray, upper_gray)
 
-    # Inverti la maschera del grigio
+    # Invert the gray mask
     gray_mask_inv = cv2.bitwise_not(gray_mask)
 
-    # Applica la maschera invertita all'immagine originale per rimuovere il grigio
+    # Apply the inverted mask to the original image to remove gray
     result = cv2.bitwise_and(cropped_block_img, cropped_block_img, mask=gray_mask_inv)
 
     block.point_cloud_coord = np.column_stack(np.where(gray_mask_inv > 0)).tolist()
-
     block.point_cloud_coord = block.point_cloud_coord + np.array([int(block.x1), int(block.y1)])
 
-    # Mostra i risultati
+    # Show results
     if debug:
         cv2.imshow('Original Image', cropped_block_img)
         cv2.imshow('Gray Mask', gray_mask_inv)
         cv2.imshow('Non-Gray Image', result)
 
-        # Salva l'immagine risultante se necessario
+        # Save resulting image if needed
         cv2.imwrite(str(ROOT) + '/images/block_isolated.png', result)
 
         cv2.waitKey(0)
@@ -125,25 +144,25 @@ def find_point_cloud_roi(block):
 
 
 def get_bbox_image(block):
-    # Leggi l'immagine
+    """
+    Gets the bounding box image for the given Lego block.
+
+    @param block: LegoBlock object.
+    @return: Cropped and transformed image of the block.
+    """
     image = cv2.imread(IMG_PATH)
     if image is None:
-        raise ValueError("Immagine non trovata al percorso specificato")
+        raise ValueError("Image not found at the specified path")
 
     top_left = (block.x1, block.y1)
     bottom_right = (block.x2, block.y2)
 
-    # Calcola gli altri due vertici
     top_right = (bottom_right[0], top_left[1])
     bottom_left = (top_left[0], bottom_right[1])
 
-    # Crea una lista dei vertici in senso orario
     vertices = [top_left, top_right, bottom_right, bottom_left]
-
-    # Converti i vertici in un array numpy
     pts = np.array(vertices, dtype=np.float32)
 
-    # Determina il rettangolo di destinazione
     (tl, tr, br, bl) = pts
     widthA = np.sqrt(((br[0] - bl[0]) ** 2) + ((br[1] - bl[1]) ** 2))
     widthB = np.sqrt(((tr[0] - tl[0]) ** 2) + ((tr[1] - tl[1]) ** 2))
@@ -159,14 +178,10 @@ def get_bbox_image(block):
         [maxWidth - 1, maxHeight - 1],
         [0, maxHeight - 1]], dtype=np.float32)
 
-    # Calcola la matrice di trasformazione
     M = cv2.getPerspectiveTransform(pts, dst)
-
-    # Applica la trasformazione prospettica
     warped = cv2.warpPerspective(image, M, (maxWidth, maxHeight))
 
     global debug
-
     if debug:
         cv2.imwrite(str(ROOT)+'/images/cropped_block.png', warped)
 
@@ -174,18 +189,22 @@ def get_bbox_image(block):
 
 
 def print_block_info(blocks):
-    # @Description prints list of blocks info
-    # @Parameters List of Block objects
+    """
+    Prints information about each block in the list.
 
+    @param blocks: List of LegoBlock objects.
+    """
     for block in blocks:
         block.info()
 
 
 def detection(img_path):
-    # @Description It crops the ZED-cam image into the Region of Interest (only the table), block detection with YOLO follows
-    # @Parameters path of the input image (from ZED camera)
-    # @Returns the list of detected Blocks
+    """
+    Performs object detection on the input image using YOLO and processes detected blocks.
 
+    @param img_path: Path of the input image.
+    @return: List of detected LegoBlock objects.
+    """
     roi.find_roi(img_path)
 
     print("Detecting...")
@@ -201,12 +220,10 @@ def detection(img_path):
 
 # CLI:  python detection.py /path/to/img.smth
 if __name__ == '__main__':
-
-    if len(sys.argv) > 1:   # img has been passed via CLI
+    if len(sys.argv) > 1:   # Image path has been passed via CLI
         img = sys.argv[1]
     else:
         img = roi.INPUT_FILE
 
     block_list = detection(img)
-
     print_block_info(block_list)

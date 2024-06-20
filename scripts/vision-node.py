@@ -1,3 +1,71 @@
+"""
+@file
+@brief This script integrates block detection and pose estimation using ROS, OpenCV, Open3D, and other libraries.
+
+@mainpage Block Detection and Pose Estimation
+
+@section Overview
+This script integrates ROS (Robot Operating System) with computer vision techniques for block detection using the ZED camera.
+It performs:
+- Image processing to find regions of interest (ROIs) using OpenCV.
+- Block detection using a custom Block Detection module (`Block_detection.py`).
+- Point cloud processing and pose estimation using Open3D.
+
+@section Details
+The script subscribes to ROS topics for images (`/ur5/zed_node/left_raw/image_raw_color`) and point clouds
+(`/ur5/zed_node/point_cloud/cloud_registered`). Upon receiving an image, it:
+- Finds ROIs and detects blocks within the ROIs using `Block_detection.py`.
+- Generates a point cloud from detected blocks and estimates their poses relative to a fixed coordinate system.
+
+The script also uses Open3D for point cloud processing, including downsampling, feature extraction, and registration
+algorithms (RANSAC and ICP) to refine pose estimation.
+
+@subsection Dependencies
+- ROS (Kinetic or newer)
+- OpenCV
+- Open3D
+- NumPy
+- SciPy
+- CV Bridge (ROS)
+- Sensor_msgs (ROS)
+
+@subsection Directories
+- `images/`: Contains images used for ROI detection and visualization.
+
+@subsection Parameters
+- `R_cloud_to_world`: Transformation matrix from cloud to world coordinates.
+- `x_camera`: Camera position offset.
+- `base_offset`: Base offset of the block.
+- `block_offset`: Offset specific to each block.
+- `voxel_size`: Size parameter for downsampling point clouds.
+
+@subsection Flags
+- `debug`: Flag to enable debug visualizations.
+
+@subsection Classes
+- `Point`: Stores point coordinates and pixel locations.
+- `block`: ROS message type for block information.
+
+@subsection Functions
+- `get_img(img)`: Callback to process incoming images, detect ROIs, and detect blocks.
+- `find_pose(point_cloud)`: Callback to process point clouds, estimate block poses, and publish results.
+- Various utility functions for point cloud operations, mesh loading, transformation, and visualization.
+
+@subsection Main
+The script initializes ROS nodes and subscribers (`img_sub`, `point_cloud_sub`) and starts the main loop to process incoming messages.
+
+@subsection Outputs
+- Publishes block poses (`vision/position`) as ROS messages.
+- Outputs debug visualizations and intermediate images to `images/` directory.
+
+@subsection Authors
+- Developed by [Author Name] at [Organization Name].
+
+@subsection License
+- This script is released under [License Type].
+
+"""
+
 import rospy
 from vision.msg import block
 from pathlib import Path
@@ -72,36 +140,6 @@ class Point:
         self.z = z
         self.px = px
 
-    def is_min_x(self, coords, px):
-        # @Description Compares this point with another to find the one with lower value of x
-        # @Parameters tuple of world coordinates of second point and pixels coordinates of this latter
-
-        if coords[0] < self.x:  # checks if x of 2nd point is lower than the one stored by this one,  if it does updates data
-            self.x = coords[0]
-            self.y = coords[1]
-            self.z = coords[2]
-            self.px = px
-
-    def is_min_y(self, coords, px):
-        # @Description Compares this point with another to find the one with lower value of y
-        # @Parameters tuple of world coordinates of second point and pixels coordinates of this latter
-
-        if coords[1] < self.y:  # checks if y of other point is lower than y of this object, if it does updates data
-            self.x = coords[0]
-            self.y = coords[1]
-            self.z = coords[2]
-            self.px = px
-
-    def is_max_y(self, coords, px):
-        # @Description Compares this point with another to find the one with greater value of y
-        # @Parameters tuple of world coordinates of second point and pixels coordinates of this latter
-
-        if coords[1] > self.y:  # checks whether y of other point is greater than this object, if it does updates data
-            self.x = coords[0]
-            self.y = coords[1]
-            self.z = coords[2]
-            self.px = px
-
     def info(self):
         # @Description Prints Point info
         print("x,y,z, PX: ", self.x, self.y, self.z, self.px)
@@ -149,44 +187,6 @@ def get_img(img):
         # FLAG TO CHANGE
         can_acquire_img = False
         can_take_point_cloud = True
-
-def get_point_cloud(point_cloud):
-
-    # @Description Callback function to collect point cloud and estimate center and pose of each block detected
-    # @Parameters point cloud from zed node
-
-    global can_take_point_cloud
-    global block_list
-    global measures
-
-    if can_take_point_cloud:
-
-        for block in block_list:
-            # finding x, y, z of the center of the block leveraging center of the bounding boxes
-            for data in point_cloud2.read_points(point_cloud, field_names=['x', 'y', 'z'], skip_nans=True, uvs=[block.center]):
-                block.point_cloud_coord = [data[0], data[1], data[2]]
-
-            # computing world coordinates through a transformation matrix and correcting result adding offsets
-            block.world_coord = R_cloud_to_world.dot(block.point_cloud_coord) + x_camera + base_offset + block_offset
-            block.world_coord[0, 2] = 0.86999       # z of the block is a constant
-
-        # make 3 measures of block world coordinates
-        if measures < 3:
-            measures+=1
-        else:
-            can_take_point_cloud = False
-            measures = 0
-
-            # calculate the pose of the block
-            for block in block_list:
-                block.yaw = find_pose(point_cloud, block)
-
-            # print block info
-            Lego.print_block_info(block_list)
-
-            # publish details to motion node
-            msg_pub(block_list)
-
 
 def create_open3d_point_cloud(point_cloud_box):
 
@@ -407,9 +407,6 @@ def rotate_point_cloud_about_axis(pcd, rotation_vector):
 
 
 
-
-
-
 # Operation to get and elaborate point cloud of blocks
 def find_pose(point_cloud):
     # @Description Callback function to collect point cloud and estimate center and pose of each block detected
@@ -450,7 +447,7 @@ def find_pose(point_cloud):
             block.world_coord[0, 2] = 0.86999  # z of the block is a constant
             #print("WORLD:", block.world_coord)
 
-            #print("LABEL: ", block.label)
+            print(f"\033[34mExecuting block {block.label} \033[0m")
 
             # STEP 4 - Loading mesh model
             source = load_mesh_model(block.label)
