@@ -505,7 +505,7 @@ def convert_3x3_to_4x4(matrix_3x3):
 
 
 # Operation to get and elaborate point cloud of blocks
-def get_point_cloud2(point_cloud):
+def find_pose(point_cloud):
     # @Description Callback function to collect point cloud and estimate center and pose of each block detected
     # @Parameters point cloud from zed node
 
@@ -524,18 +524,18 @@ def get_point_cloud2(point_cloud):
             sys.exit(1)
 
         for block in block_list:
+            block_coords_set = set(tuple(coord) for coord in block.point_cloud_coord)
             for x in range(int(block.x1), int(block.x2)):
                 for y in range(int(block.y1), int(block.y2)):
-                    for point in point_cloud2.read_points(point_cloud, field_names=['x', 'y', 'z'], skip_nans=True, uvs=[(int(x), int(y))]):
-                        point_cloud_box.append(np.array(point))
-                        block.point_cloud_coord = [point[0], point[1], point[2]]
-
+                    # Verificare se (x, y) è presente in block_coords_set
+                    if (x, y) in block_coords_set:
+                        points = point_cloud2.read_points(point_cloud, field_names=['x', 'y', 'z'],
+                                                          uvs=[(int(x), int(y))], skip_nans=True)
+                        for point in points:
+                            point_cloud_box.append(np.array(point))
 
 
             target = create_open3d_point_cloud(point_cloud_box)
-
-
-
 
 
             # # computing world coordinates through a transformation matrix and correcting result adding offsets
@@ -544,7 +544,6 @@ def get_point_cloud2(point_cloud):
             # print("WORLD:", block.world_coord)
 
             print("LABEL: ", block.label)
-            #visualize_point_cloud(pcd)
 
             source = load_mesh_model(block.label)
 
@@ -613,81 +612,6 @@ def get_point_cloud2(point_cloud):
         #     # publish details to motion node
         #     msg_pub(block_list)
 
-def find_pose(point_cloud, block):
-    # @Description Function to compute object pose. Basically, the block is "sliced" at a specific height to find the 2
-    #   useful points:
-    #   - x_min: the nearest point the camera
-    #   - y_min: the rightmost point (near the arm)
-    #   these points are used to calculate yaw angle
-    # @Parameters point cloud and the block
-    # @Returns yaw angle (radiant)
-
-    # CONSTANTS (used only here)
-    table_height = 0.88
-    target_height = 0.012 + table_height
-
-    selected_points = []       # list of points at the target_height value
-
-    print("Finding pose...")
-
-    min_x = Point()
-    min_y = Point()
-    # max_y = Point()
-
-    # scan point cloud of the bounding box
-    for x in range(int(block.x1), int(block.x2)):
-        for y in range(int(block.y1), int(block.y2)):
-            for data in point_cloud2.read_points(point_cloud, field_names=['x', 'y', 'z'], skip_nans=True, uvs=[(x,y)]):
-                point_coords = [data[0], data[1], data[2]]
-
-                # transform current point to world coordinate
-                point_world = R_cloud_to_world.dot(point_coords) + x_camera + base_offset
-
-                # check whether it belongs to target height
-                if abs(point_world[0, 2] - target_height) <= 0.001:
-
-                    current_coords = (point_world[0, 0], point_world[0, 1], point_world[0, 2])
-                    selected_points.append(current_coords)
-
-                    if len(selected_points) == 1:   # if it is the first point store it as the min_x, min_y
-                        color_pixel(x, y, 'red')
-                        min_x.set(point_world[0, 0], point_world[0, 1], point_world[0, 2], (x, y))
-                        min_y.set(point_world[0, 0], point_world[0, 1], point_world[0, 2], (x, y))
-                        # max_y.set(point_world[0, 0], point_world[0, 1], point_world[0, 2], (x, y))
-                    else:
-                        color_pixel(x, y, 'red')
-                        min_x.is_min_x(current_coords, (x, y))
-                        min_y.is_min_y(current_coords, (x, y))
-                        # max_y.is_max_y(current_coords, (x, y))
-
-    # Print 3 vertices info
-    #min_x.info()
-    #min_y.info()
-    #max_y.info()
-
-    # Show in yellow points of interest
-    color_pixel(min_x.px[0], min_x.px[1], 'yellow')
-    color_pixel(min_y.px[0], min_y.px[1], 'yellow')
-    # color_pixel(max_y.px[0], max_y.px[1], 'yellow')
-
-    # Finding yaw angle
-    yaw = math.atan2(min_y.x - min_x.x, min_x.y - min_y.y)
-
-    return yaw
-
-
-def color_pixel(x, y, color):
-    # @Description function to color pixels in a image
-    # @Parameters x and y coordinaets of pixels to color and a string indicating to the color to use
-
-    img = cv.imread(LINE_IMG, cv.IMREAD_COLOR)
-
-    if color == 'red':
-        img[y][x] = np.array([0, 0, 255])
-    elif color == 'yellow':
-        img[y][x] = np.array([0, 255, 255])
-
-    cv.imwrite(LINE_IMG, img);
 
 
 def to_quaternions(r, p ,y):
@@ -744,7 +668,7 @@ if __name__ == '__main__':
 
     # Subscribers
     img_sub = rospy.Subscriber("/ur5/zed_node/left_raw/image_raw_color", Image, get_img)
-    point_cloud_sub = rospy.Subscriber("/ur5/zed_node/point_cloud/cloud_registered", PointCloud2, get_point_cloud2, queue_size=1)   # Subscriber Point cloud
+    point_cloud_sub = rospy.Subscriber("/ur5/zed_node/point_cloud/cloud_registered", PointCloud2, find_pose, queue_size=1)   # Subscriber Point cloud
 
     rospy.init_node('block_detector', anonymous=True)
     rate = rospy.Rate(10)  # 10hz
