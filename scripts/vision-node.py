@@ -35,7 +35,7 @@ R_cloud_to_world = np.matrix([[0, -0.49948, 0.86632], [-1., 0., 0.], [0., -0.866
 x_camera = np.array([-0.9, 0.24, -0.35])
 base_offset = np.array([0.5, 0.35, 1.75])
 block_offset = np.array([-0.011453, -0.005865, -0.019507])
-voxel_size = 0.005
+voxel_size = 0.003
 
 
 TABLE_OFFSET = 0.86 + 0.1
@@ -47,6 +47,12 @@ send_next_msg = True
 block_list = []
 measures = 0        # num of measures for world position of blocks
 icp_threshold = 0.004
+
+
+# ---------------- DEBUG --------------------
+debug = False
+
+
 
 class Point:
     # @Description Class to store points in the world space useful to estimate block pose
@@ -183,6 +189,8 @@ def get_point_cloud(point_cloud):
 
 
 def create_open3d_point_cloud(point_cloud_box):
+
+
     # Creating an Open3D point cloud object
     pcd = o3d.geometry.PointCloud()
 
@@ -397,111 +405,9 @@ def rotate_point_cloud_about_axis(pcd, rotation_vector):
     pcd.rotate(rotation_matrix, center=(0, 0, 0))
     return pcd
 
-def mirror_point_cloud(pcd, axis='x'):
-    """
-    Specchia la nuvola di punti rispetto all'asse specificato.
-
-    Args:
-        pcd (open3d.geometry.PointCloud): La nuvola di punti da specchiare.
-        axis (str): L'asse rispetto al quale specchiare ('x', 'y' o 'z').
-
-    Returns:
-        open3d.geometry.PointCloud: La nuvola di punti specchiata.
-    """
-    # Matrice di trasformazione per specchiare la nuvola di punti
-    if axis == 'x':
-        transformation_matrix = np.array([[-1, 0, 0, 0],
-                                          [0, 1, 0, 0],
-                                          [0, 0, 1, 0],
-                                          [0, 0, 0, 1]])
-    elif axis == 'y':
-        transformation_matrix = np.array([[1, 0, 0, 0],
-                                          [0, -1, 0, 0],
-                                          [0, 0, 1, 0],
-                                          [0, 0, 0, 1]])
-    elif axis == 'z':
-        transformation_matrix = np.array([[1, 0, 0, 0],
-                                          [0, 1, 0, 0],
-                                          [0, 0, -1, 0],
-                                          [0, 0, 0, 1]])
-    else:
-        raise ValueError("Axis must be 'x', 'y' or 'z'")
-
-    # Applica la trasformazione
-    pcd.transform(transformation_matrix)
-    return pcd
-
-def compute_pose(point_cloud):
-    """
-    Calcola la posa (matrice di trasformazione) di una nuvola di punti.
-
-    Args:
-        point_cloud (open3d.geometry.PointCloud): La nuvola di punti di cui calcolare la posa.
-
-    Returns:
-        np.ndarray: La matrice di trasformazione 4x4 che rappresenta la posa della nuvola di punti.
-    """
-    # Calcola il centro della nuvola di punti
-    center = point_cloud.get_center()
-
-    # Per semplificazione, usiamo una matrice di rotazione identità
-    rotation_matrix = np.eye(3)
-
-    # Combina il centro (traslazione) e la matrice di rotazione in una matrice di trasformazione 4x4
-    transformation_matrix = np.eye(4)
-    transformation_matrix[:3, :3] = rotation_matrix
-    transformation_matrix[:3, 3] = center
-
-    return transformation_matrix
 
 
-def filter_point_cloud_by_distance(point_cloud, max_distance):
-    """
-    Rimuove i punti dalla nuvola di punti che sono distanti oltre una certa soglia.
 
-    Args:
-        point_cloud (open3d.geometry.PointCloud): La nuvola di punti da filtrare.
-        max_distance (float): La distanza massima consentita.
-
-    Returns:
-        open3d.geometry.PointCloud: La nuvola di punti filtrata.
-    """
-    # Converti la nuvola di punti in un array NumPy
-    points = np.asarray(point_cloud.points)
-
-    # Calcola la distanza di ogni punto dall'origine (0, 0, 0)
-    distances = np.linalg.norm(points, axis=1)
-
-    # Filtra i punti che sono entro la distanza massima
-    filtered_points = points[distances <= max_distance]
-
-    # Crea una nuova nuvola di punti con i punti filtrati
-    filtered_point_cloud = o3d.geometry.PointCloud()
-    filtered_point_cloud.points = o3d.utility.Vector3dVector(filtered_points)
-
-    return filtered_point_cloud
-
-
-def convert_3x3_to_4x4(matrix_3x3):
-    """
-    Converte una matrice 3x3 in una matrice di trasformazione omogenea 4x4.
-
-    Args:
-        matrix_3x3 (numpy.ndarray): La matrice di rotazione 3x3.
-
-    Returns:
-        numpy.ndarray: La matrice di trasformazione omogenea 4x4.
-    """
-    # Assicurati che la matrice di input sia 3x3
-    assert matrix_3x3.shape == (3, 3), "La matrice di input deve essere 3x3"
-
-    # Crea una matrice 4x4 di identità
-    matrix_4x4 = np.eye(4)
-
-    # Copia la matrice 3x3 nella parte superiore sinistra della matrice 4x4
-    matrix_4x4[:3, :3] = matrix_3x3
-
-    return matrix_4x4
 
 
 # Operation to get and elaborate point cloud of blocks
@@ -514,104 +420,86 @@ def find_pose(point_cloud):
     global measures
     global icp_threshold
     global voxel_size
+    global debug
 
     if can_take_point_cloud:
 
-        point_cloud_box = []
+
 
         if len(block_list) == 0:
             print("NO BLOCK DETECTED")
             sys.exit(1)
 
+        # STEP 1 - Taking point clouds for each block
         for block in block_list:
-            block_coords_set = set(tuple(coord) for coord in block.point_cloud_coord)
+            point_cloud_box = []
             for x in range(int(block.x1), int(block.x2)):
                 for y in range(int(block.y1), int(block.y2)):
-                    # Verificare se (x, y) è presente in block_coords_set
-                    if (x, y) in block_coords_set:
                         points = point_cloud2.read_points(point_cloud, field_names=['x', 'y', 'z'],
                                                           uvs=[(int(x), int(y))], skip_nans=True)
                         for point in points:
                             point_cloud_box.append(np.array(point))
 
 
+            # STEP 2 - storing block point cloud
             target = create_open3d_point_cloud(point_cloud_box)
 
+            # STEP 3 - Calculating center of the block leveraging center of the bounding box
+            # computing world coordinates through a transformation matrix and correcting result adding offsets
+            block.world_coord = R_cloud_to_world.dot(target.get_center()) + x_camera + base_offset + block_offset
+            block.world_coord[0, 2] = 0.86999  # z of the block is a constant
+            #print("WORLD:", block.world_coord)
 
-            # # computing world coordinates through a transformation matrix and correcting result adding offsets
-            # block.world_coord = R_cloud_to_world.dot(target.get_center()) + x_camera + base_offset + block_offset
-            # block.world_coord[0, 2] = 0.86999  # z of the block is a constant
-            # print("WORLD:", block.world_coord)
+            #print("LABEL: ", block.label)
 
-            print("LABEL: ", block.label)
-
+            # STEP 4 - Loading mesh model
             source = load_mesh_model(block.label)
 
-#[-0.02216, -0.40428 , 0.0211]
+            # STEP 5 - Applying a series transformation to match simulation origin frame (starting from camera POV)
+            #[-0.02216, -0.40428 , 0.0211]
             target = rotate_point_cloud_about_axis(target, [np.pi - 0.02216, np.pi/2 - 0.40428, np.pi/2 + 0.0211])
             target = translate_point_cloud(target, [-0.4, 0.52, 1.4])
             #source = translate_point_cloud(source, [-0.4, 0.52, 1.4])
 
-            print("TARGET center: ", target.get_center())
-
-            #pose = compute_pose(target)
-
+            #print("TARGET center: ", target.get_center())
             #draw_registration_result(source, target, np.identity(4))
 
+            # STEP 6 - Preparing point clouds (downsampling)
             source, target, source_down, target_down, source_fpfh, target_fpfh = prepare_point_clouds(source, target, voxel_size)
-            #
-            result_ransac = execute_global_registration(source_down, target_down, source_fpfh, target_fpfh, voxel_size)
-            #
-            print("RANSAC result: ", result_ransac)
-            #
-            result_icp = refine_registration(source_down, target_down, source_fpfh, target_fpfh, voxel_size, result_ransac)
-            #
-            print("ICP result: ", result_icp)
 
-            draw_registration_result(source_down, target_down, result_icp.transformation)
+            # STEP 7 - Executing a global registration through RANSAC algorithm
+            result_ransac = execute_global_registration(source_down, target_down, source_fpfh, target_fpfh, voxel_size)
+
+            #print("RANSAC result: ", result_ransac)
+
+            # STEP 8 - Refining registration using ICP algorithm
+            result_icp = refine_registration(source_down, target_down, source_fpfh, target_fpfh, voxel_size, result_ransac)
+
+            #print("ICP result: ", result_icp)
+
+            if debug:       # show 3D situation after registration (useful to undestand results)
+               draw_registration_result(source_down, target_down, result_icp.transformation)
 
 
             #draw_registration_result(source, target, transformation)
 
             #print("Transformation matrix:\n", transformation)
 
+            # extarcting RPY angles from transformation matrx
             yaw, pitch, roll = extract_rpy_from_transformation(result_icp.transformation)
 
-            print("Roll: ", roll + 0.11)
-            print("Pitch: ", pitch )
-            print("Yaw: ", yaw )
+
+            # print("Roll: ", roll + 0.11)
+            # print("Pitch: ", pitch )
+            # print("Yaw: ", yaw )
+
+            # Assigning block pose
+            block.pose = [roll + 0.11, pitch, yaw]
 
         can_take_point_cloud = False
 
+        # publishing messages
         msg_pub(block_list)
-
-
-        #     # finding x, y, z of the center of the block leveraging center of the bounding boxes
-        #     for data in point_cloud2.read_points(point_cloud, field_names=['x', 'y', 'z'], skip_nans=True,
-        #                                          uvs=[block.center]):
-        #         block.point_cloud_coord = [data[0], data[1], data[2]]
-        #
-        #     # computing world coordinates through a transformation matrix and correcting result adding offsets
-        #     block.world_coord = R_cloud_to_world.dot(block.point_cloud_coord) + x_camera + base_offset + block_offset
-        #     block.world_coord[0, 2] = 0.86999  # z of the block is a constant
-        #
-        # # make 3 measures of block world coordinates
-        # if measures < 3:
-        #     measures += 1
-        # else:
-        #     can_take_point_cloud = False
-        #     measures = 0
-        #
-        #     # calculate the pose of the block
-        #     for block in block_list:
-        #         block.yaw = find_pose(point_cloud, block)
-        #
-        #     # print block info
-        #     Lego.print_block_info(block_list)
-        #
-        #     # publish details to motion node
-        #     msg_pub(block_list)
-
 
 
 def to_quaternions(r, p ,y):
@@ -628,34 +516,26 @@ def msg_pub(block_list):
 
     global send_next_msg
 
-    if send_next_msg:
-
+    for current_block in block_list:
         msg = block()
-        if len(block_list) > 0:
-            current_block = block_list.pop()
-        if len(block_list) == 0:
-            print("PUBLISHED ALL BLOCKS")
-            send_next_msg = False
-            return
 
         # Preparing msg
         msg.label = current_block.label
         msg.x = round(current_block.world_coord[0, 0], 6)
         msg.y = round(current_block.world_coord[0, 1], 6)
         msg.z = round(current_block.world_coord[0, 2], 6)
-        msg.roll= 0.0
-        msg.pitch = 0.0
-        msg.yaw = current_block.yaw
+        msg.roll = current_block.pose[0]
+        msg.pitch = current_block.pose[1]
+        msg.yaw = current_block.pose[2]
 
         # QUATERNION conversion
         q = to_quaternions(msg.roll, msg.pitch, msg.yaw)
 
-        #block_info(msg)    # print msg info
+        block_info(msg)    # print msg info
 
         pub.publish(msg)
         rate.sleep()
 
-        send_next_msg = False
         print("Waiting for sending next block")
 
 # ----------------------------------------------- MAIN -----------------------------------------------

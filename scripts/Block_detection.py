@@ -56,6 +56,8 @@ class LegoBlock:
         self.img = Image.open(IMG_PATH)
         self.center = (int((x1 + x2) / 2), int((y1 + y2) / 2))
         self.point_cloud_coord = []
+        self.world_coord = []
+        self.pose = []
 
 
     def info(self):
