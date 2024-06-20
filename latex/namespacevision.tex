@@ -1,0 +1,70 @@
+\hypertarget{namespacevision}{}\doxysection{vision Namespace Reference}
+\label{namespacevision}\index{vision@{vision}}
+
+
+\doxysubsection{Detailed Description}
+-\/node\begin{DoxyVerb}@file
+@brief This script integrates block detection and pose estimation using ROS, OpenCV, Open3D, and other libraries.
+
+@mainpage Block Detection and Pose Estimation
+
+@section Overview
+This script integrates ROS (Robot Operating System) with computer vision techniques for block detection using the ZED camera.
+It performs:
+- Image processing to find regions of interest (ROIs) using OpenCV.
+- Block detection using a custom Block Detection module (`Block_detection.py`).
+- Point cloud processing and pose estimation using Open3D.
+
+@section Details
+The script subscribes to ROS topics for images (`/ur5/zed_node/left_raw/image_raw_color`) and point clouds
+(`/ur5/zed_node/point_cloud/cloud_registered`). Upon receiving an image, it:
+- Finds ROIs and detects blocks within the ROIs using `Block_detection.py`.
+- Generates a point cloud from detected blocks and estimates their poses relative to a fixed coordinate system.
+
+The script also uses Open3D for point cloud processing, including downsampling, feature extraction, and registration
+algorithms (RANSAC and ICP) to refine pose estimation.
+
+@subsection Dependencies
+- ROS (Kinetic or newer)
+- OpenCV
+- Open3D
+- NumPy
+- SciPy
+- CV Bridge (ROS)
+- Sensor_msgs (ROS)
+
+@subsection Directories
+- `images/`: Contains images used for ROI detection and visualization.
+
+@subsection Parameters
+- `R_cloud_to_world`: Transformation matrix from cloud to world coordinates.
+- `x_camera`: Camera position offset.
+- `base_offset`: Base offset of the block.
+- `block_offset`: Offset specific to each block.
+- `voxel_size`: Size parameter for downsampling point clouds.
+
+@subsection Flags
+- `debug`: Flag to enable debug visualizations.
+
+@subsection Classes
+- `Point`: Stores point coordinates and pixel locations.
+- `block`: ROS message type for block information.
+
+@subsection Functions
+- `get_img(img)`: Callback to process incoming images, detect ROIs, and detect blocks.
+- `find_pose(point_cloud)`: Callback to process point clouds, estimate block poses, and publish results.
+- Various utility functions for point cloud operations, mesh loading, transformation, and visualization.
+
+@subsection Main
+The script initializes ROS nodes and subscribers (`img_sub`, `point_cloud_sub`) and starts the main loop to process incoming messages.
+
+@subsection Outputs
+- Publishes block poses (`vision/position`) as ROS messages.
+- Outputs debug visualizations and intermediate images to `images/` directory.
+
+@subsection Authors
+- Developed by [Author Name] at [Organization Name].
+
+@subsection License
+- This script is released under [License Type].\end{DoxyVerb}
+ 
