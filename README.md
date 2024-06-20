@@ -58,7 +58,6 @@ For running the project you need to run the following commands:
 ```BASH
 python3 ~/ros_ws/src/locosim/robot_control/base_controllers/ur5_generic.py
 ```
-```
 2) Run in another window the vision node with the following command:
 ```BASH
 . ~/ros_ws/devel/setup.bash
