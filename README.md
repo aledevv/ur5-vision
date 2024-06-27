@@ -52,7 +52,7 @@ self.world_name = 'world.world'
 ```
 Now we are able to run the project.
 
-### RUN
+### RUN VISION NODE
 For running the project you need to run the following commands:
 1) Run in one window the locosim simulation with the following command:
 ```BASH
